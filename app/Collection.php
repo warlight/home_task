@@ -11,8 +11,11 @@ class Collection
         $this->items = $records;
     }
 
-    public function where($column, $value)
+    public function first()
     {
-        //
+        if (!empty($this->items)) {
+            return $this->items[0];
+        }
+        return null;
     }
 }

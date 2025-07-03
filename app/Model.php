@@ -80,6 +80,11 @@ abstract class Model
         return new Collection($items);
     }
 
+    public static function count(): int
+    {
+        return self::getQueryBuilder()->count();
+    }
+
     public function __construct(array $attributes = [])
     {
         $this->attributes = $attributes;
