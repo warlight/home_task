@@ -5,15 +5,12 @@ use App\Models\UserType;
 
 require __DIR__ . '/vendor/autoload.php';
 
-//$user = User::create([
-//    'name' => 'Igor',
-//    'email' => 'igor@gmail.com',
-//    'user_type' => 1,
-//]);
-//
-//dd($user, 'finish');
+$user = User::create([
+    'name' => 'Igor',
+    'email' => 'igor@gmail.com',
+    'user_type' => 1,
+]);
 
+//$users = User::where('idd', 123)->get();
 
-$users = User::get();
-
-dd($users);
+//dd($users);
