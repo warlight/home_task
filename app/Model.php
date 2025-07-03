@@ -3,20 +3,28 @@
 namespace App;
 
 use App\Exceptions\ColumnNotFoundException;
+use App\Exceptions\JsonFileException;
 use App\Exceptions\LogicException;
+use App\Exceptions\NotFoundException;
 
 abstract class Model
 {
     protected array $attributes = [];
     protected static QueryBuilder $queryBuilder;
 
-    public static function getQueryBuilder(): QueryBuilder
+    protected static function getQueryBuilder(): QueryBuilder
     {
         if (empty(self::$queryBuilder)) {
             self::$queryBuilder = new QueryBuilder(get_called_class(), get_class_vars(get_called_class()));
         }
 
         return self::$queryBuilder;
+    }
+
+    public static function select(array|string $columns): QueryBuilder
+    {
+        $queryBuilder = self::getQueryBuilder();
+        return $queryBuilder->select($columns);
     }
 
     public static function where($column, $operator, $value = null): Model
@@ -27,32 +35,48 @@ abstract class Model
         return $queryBuilder->wrapModelClass();
     }
 
+    /**
+     * @throws JsonFileException
+     */
     public static function create(array $attributes): Model
     {
         $queryBuilder = self::getQueryBuilder();
         return $queryBuilder->insert($attributes);
     }
 
-    public static function find($keyValue): Model
+    /**
+     * @throws JsonFileException
+     * @throws NotFoundException
+     * @throws ColumnNotFoundException
+     */
+    public static function find($keyValue): ?Model
     {
         return (self::getQueryBuilder())->find($keyValue);
     }
 
-    public static function first(): Model
+    /**
+     * @throws JsonFileException
+     * @throws ColumnNotFoundException
+     */
+    public static function first(): ?Model
     {
         $queryBuilder = self::getQueryBuilder();
         $items = $queryBuilder->get();
         if (!empty($items)) {
             return $items[0];
         } else {
-            return $queryBuilder->wrapModelClass();
+            return null;
         }
     }
 
-    public static function get(): Collection
+    /**
+     * @throws JsonFileException
+     * @throws ColumnNotFoundException
+     */
+    public static function get(array|string|null $columns = null): Collection
     {
         $queryBuilder = self::getQueryBuilder();
-        $items = $queryBuilder->get();
+        $items = $queryBuilder->select($columns)->get();
         return new Collection($items);
     }
 
@@ -61,6 +85,9 @@ abstract class Model
         $this->attributes = $attributes;
     }
 
+    /**
+     * @throws LogicException
+     */
     public function __get($name)
     {
         $exploded = explode('_', $name);
@@ -77,6 +104,10 @@ abstract class Model
         throw new LogicException('No such attribute: ' . $name);
     }
 
+    /**
+     * @throws JsonFileException
+     * @throws ColumnNotFoundException
+     */
     public function update(array $updateAttributes): Model
     {
         $queryBuilder = self::getQueryBuilder();
@@ -90,6 +121,11 @@ abstract class Model
         return $queryBuilder->update($this->attributes);
     }
 
+    /**
+     * @throws JsonFileException
+     * @throws LogicException
+     * @throws ColumnNotFoundException
+     */
     public function destroy(): void
     {
         if (empty ($this->attributes)) {

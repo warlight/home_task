@@ -3,13 +3,16 @@
 namespace App;
 
 use App\Exceptions\ColumnNotFoundException;
+use App\Exceptions\JsonFileException;
 use App\Exceptions\NotFoundException;
+use Exception;
 
 class QueryBuilder
 {
     protected string $model;
     protected string $fileName = '';
     protected array $modelProperties = [];
+    protected array $selectColumns = [];
 
     protected array $rows;
     protected array $wheres = [];
@@ -18,7 +21,7 @@ class QueryBuilder
     {
         $this->model = $model;
         $this->modelProperties = $modelProperties;
-        $this->connect();
+        $this->fileName = self::getFileName();
     }
 
     protected function getFileName(): string
@@ -30,12 +33,6 @@ class QueryBuilder
         return 'data/' . strtolower($snakeCase) . '.json';
     }
 
-    protected function connect(): void
-    {
-        // get classes name and find JSON file in directory:
-        $this->fileName = self::getFileName();
-    }
-
     protected function load(): void
     {
         if (!file_exists($this->fileName)) {
@@ -43,10 +40,15 @@ class QueryBuilder
             $this->storeFile();
         }
 
-        $this->rows = json_decode(file_get_contents($this->fileName), true);
+        $fileContent = file_get_contents($this->fileName);
+        $rows = json_decode($fileContent, true);
+        if (is_null($rows) && !empty($fileContent)) {
+            throw new JsonFileException('File ' . $this->fileName . ' contains invalid JSON');
+        }
+        $this->rows = $rows ?? [];
     }
 
-    public function getPrimaryKey(): string
+    protected function getPrimaryKey(): string
     {
         if (isset($this->modelProperties['primaryKey'])) {
             return $this->modelProperties['primaryKey'];
@@ -55,6 +57,9 @@ class QueryBuilder
         return 'id';
     }
 
+    /**
+     * @throws JsonFileException
+     */
     protected function getNextId(): int
     {
         if (empty($this->rows)) {
@@ -68,6 +73,10 @@ class QueryBuilder
         return 1;
     }
 
+    /**
+     * @throws JsonFileException
+     * @throws ColumnNotFoundException
+     */
     protected function executeSelectQuery(): array
     {
         $this->load();
@@ -113,9 +122,33 @@ class QueryBuilder
             }
         }
 
+        if (!empty($this->selectColumns)) {
+            if (!empty($columns)) {
+                foreach ($this->selectColumns as $selectColumn) {
+                    if (!in_array($selectColumn, $columns)) {
+                        throw new ColumnNotFoundException('no such column: ' . $selectColumn);
+                    }
+                }
+            }
+            $this->rows = array_map(function ($row) {
+                $newRow = [];
+                foreach ($this->selectColumns as $column) {
+                    $newRow[$column] = $row[$column];
+                }
+                return $newRow;
+            }, $this->rows);
+        }
+
+        // reset conditions
+        $this->selectColumns = [];
+        $this->wheres = [];
+
         return $this->rows;
     }
 
+    /**
+     * @throws JsonFileException
+     */
     protected function save(array $attributes): void
     {
         $this->load();
@@ -136,6 +169,9 @@ class QueryBuilder
         $this->storeFile($this->rows);
     }
 
+    /**
+     * @throws JsonFileException
+     */
     public function insert(array $attributes): Model
     {
         if (!in_array($this->getPrimaryKey(), $attributes)) {
@@ -147,13 +183,18 @@ class QueryBuilder
         return $this->wrapModelClass($attributes);
     }
 
+    /**
+     * @throws JsonFileException
+     */
     public function update(array $attributes): Model
     {
         $this->save($attributes);
         return $this->wrapModelClass($attributes);
     }
 
-    /* @throws ColumnNotFoundException */
+    /* @throws ColumnNotFoundException
+     * @throws JsonFileException
+     */
     public function get(): array
     {
         $rows = $this->executeSelectQuery();
@@ -165,7 +206,9 @@ class QueryBuilder
         return $items;
     }
 
-    /* @throws ColumnNotFoundException */
+    /* @throws ColumnNotFoundException
+     * @throws JsonFileException
+     */
     public function count(): int
     {
         $rows = $this->executeSelectQuery();
@@ -177,7 +220,16 @@ class QueryBuilder
         return new $this->model($attributes);
     }
 
-    public function where($column, $operator, $value = null): void
+    public function select(string|array|null $columns): self
+    {
+        if (!is_null($columns)) {
+            $this->selectColumns = is_array($columns) ? $columns : [$columns];
+        }
+
+        return $this;
+    }
+
+    public function where($column, $operator, $value = null): self
     {
         $condition = [
             'column' => $column
@@ -192,23 +244,31 @@ class QueryBuilder
         }
 
         $this->wheres[] = $condition;
+
+        return $this;
     }
 
-    public function find(int $primaryKeyValue): Model
+    /**
+     * @throws NotFoundException
+     * @throws ColumnNotFoundException|JsonFileException
+     */
+    public function find(int $primaryKeyValue): ?Model
     {
-        dd($this->getPrimaryKey());
         $this->where($this->getPrimaryKey(), $primaryKeyValue);
-        dd($this->wheres);
         $rows = $this->executeSelectQuery();
 
         if (!empty ($rows)) {
             return $this->wrapModelClass(array_shift($rows));
         }
 
-        throw new NotFoundException();
+        throw new NotFoundException('No such record with primary key value ' . $primaryKeyValue);
     }
 
-    public function delete(array $attributes)
+    /**
+     * @throws JsonFileException
+     * @throws ColumnNotFoundException
+     */
+    public function delete(array $attributes): void
     {
         $key = $attributes[$this->getPrimaryKey()];
 
@@ -217,9 +277,16 @@ class QueryBuilder
         $this->storeFile($newRows);
     }
 
+    /**
+     * @throws JsonFileException
+     */
     protected function storeFile(array $rows = []): void
     {
         $this->rows = $rows;
-        file_put_contents($this->fileName, json_encode($rows));
+        try {
+            file_put_contents($this->fileName, json_encode($rows));
+        } catch (Exception $exception) {
+            throw new JsonFileException($error->getMessage());
+        }
     }
 }
