@@ -80,6 +80,10 @@ abstract class Model
         return new Collection($items);
     }
 
+    /**
+     * @throws JsonFileException
+     * @throws ColumnNotFoundException
+     */
     public static function count(): int
     {
         return self::getQueryBuilder()->count();

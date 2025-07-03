@@ -33,6 +33,9 @@ class QueryBuilder
         return 'data/' . strtolower($snakeCase) . '.json';
     }
 
+    /**
+     * @throws JsonFileException
+     */
     protected function load(): void
     {
         if (!file_exists($this->fileName)) {
