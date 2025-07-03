@@ -13,6 +13,6 @@ class Collection
 
     public function where($column, $value)
     {
-        ///
+        //
     }
 }

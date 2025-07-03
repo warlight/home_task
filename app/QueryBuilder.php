@@ -9,13 +9,15 @@ class QueryBuilder
 {
     protected string $model;
     protected string $fileName = '';
-    protected array $rows;
+    protected array $modelProperties = [];
 
+    protected array $rows;
     protected array $wheres = [];
 
-    public function __construct(string $model)
+    public function __construct(string $model, array $modelProperties)
     {
         $this->model = $model;
+        $this->modelProperties = $modelProperties;
         $this->connect();
     }
 
@@ -32,19 +34,24 @@ class QueryBuilder
     {
         // get classes name and find JSON file in directory:
         $this->fileName = self::getFileName();
-        if (!file_exists($this->fileName)) {
-            // if there is no such file - create it
-            file_put_contents($this->fileName, '[]');
-        }
     }
 
     protected function load(): void
     {
+        if (!file_exists($this->fileName)) {
+            // if there is no such file - create it
+            $this->storeFile();
+        }
+
         $this->rows = json_decode(file_get_contents($this->fileName), true);
     }
 
     public function getPrimaryKey(): string
     {
+        if (isset($this->modelProperties['primaryKey'])) {
+            return $this->modelProperties['primaryKey'];
+        }
+
         return 'id';
     }
 
@@ -94,11 +101,39 @@ class QueryBuilder
                             return false;
                         });
                         break;
+                    case '!=':
+                        $this->rows = array_filter($this->rows, function ($row) use ($condition) {
+                            if (is_integer($row[$condition['column']])) {
+                                return $row[$condition['column']] != $condition['value'];
+                            }
+                            return false;
+                        });
+                        break;
                 }
             }
         }
 
         return $this->rows;
+    }
+
+    protected function save(array $attributes): void
+    {
+        $this->load();
+
+        $key = $attributes[$this->getPrimaryKey()];
+        $found = false;
+        foreach ($this->rows as $rowKey => $row) {
+            if ($key === $row[$this->getPrimaryKey()]) {
+                $this->rows[$rowKey] = $attributes;
+                $found = true;
+            }
+        }
+
+        if (!$found) {
+            $this->rows[] = $attributes;
+        }
+
+        $this->storeFile($this->rows);
     }
 
     public function insert(array $attributes): Model
@@ -112,6 +147,13 @@ class QueryBuilder
         return $this->wrapModelClass($attributes);
     }
 
+    public function update(array $attributes): Model
+    {
+        $this->save($attributes);
+        return $this->wrapModelClass($attributes);
+    }
+
+    /* @throws ColumnNotFoundException */
     public function get(): array
     {
         $rows = $this->executeSelectQuery();
@@ -123,6 +165,7 @@ class QueryBuilder
         return $items;
     }
 
+    /* @throws ColumnNotFoundException */
     public function count(): int
     {
         $rows = $this->executeSelectQuery();
@@ -134,7 +177,7 @@ class QueryBuilder
         return new $this->model($attributes);
     }
 
-    public function where($column, $operator, $value = 'null'): void
+    public function where($column, $operator, $value = null): void
     {
         $condition = [
             'column' => $column
@@ -153,13 +196,30 @@ class QueryBuilder
 
     public function find(int $primaryKeyValue): Model
     {
+        dd($this->getPrimaryKey());
         $this->where($this->getPrimaryKey(), $primaryKeyValue);
+        dd($this->wheres);
         $rows = $this->executeSelectQuery();
 
         if (!empty ($rows)) {
-            return $this->wrapModelClass($rows[0]);
+            return $this->wrapModelClass(array_shift($rows));
         }
 
         throw new NotFoundException();
+    }
+
+    public function delete(array $attributes)
+    {
+        $key = $attributes[$this->getPrimaryKey()];
+
+        $this->where($this->getPrimaryKey(), '!=', $key);
+        $newRows = $this->executeSelectQuery();
+        $this->storeFile($newRows);
+    }
+
+    protected function storeFile(array $rows = []): void
+    {
+        $this->rows = $rows;
+        file_put_contents($this->fileName, json_encode($rows));
     }
 }

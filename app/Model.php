@@ -2,31 +2,22 @@
 
 namespace App;
 
+use App\Exceptions\ColumnNotFoundException;
+use App\Exceptions\LogicException;
+
 abstract class Model
 {
-    protected array $fillable = [];
     protected array $attributes = [];
-    protected static array $data = [];
     protected static QueryBuilder $queryBuilder;
 
     public static function getQueryBuilder(): QueryBuilder
     {
         if (empty(self::$queryBuilder)) {
-            self::$queryBuilder = new QueryBuilder(get_called_class());
+            self::$queryBuilder = new QueryBuilder(get_called_class(), get_class_vars(get_called_class()));
         }
 
         return self::$queryBuilder;
     }
-
-//    protected static function store(): void
-//    {
-//        $queryBuilder = self::getQueryBuilder();
-//
-//
-//        $fileName = self::getFileName();
-//        file_put_contents($fileName, json_encode(self::$data));
-//    }
-
 
     public static function where($column, $operator, $value = null): Model
     {
@@ -36,21 +27,26 @@ abstract class Model
         return $queryBuilder->wrapModelClass();
     }
 
-    public static function create(array $attributes)
+    public static function create(array $attributes): Model
     {
         $queryBuilder = self::getQueryBuilder();
-        $queryBuilder->insert($attributes);
-
-        $attributes['id'] = self::getNextId();
-        self::$data = array_merge(self::$data, [$attributes]);
-        self::store();
-        $className = get_called_class();
-        return new $className($attributes);
+        return $queryBuilder->insert($attributes);
     }
 
-    public static function find($keyValue)
+    public static function find($keyValue): Model
     {
         return (self::getQueryBuilder())->find($keyValue);
+    }
+
+    public static function first(): Model
+    {
+        $queryBuilder = self::getQueryBuilder();
+        $items = $queryBuilder->get();
+        if (!empty($items)) {
+            return $items[0];
+        } else {
+            return $queryBuilder->wrapModelClass();
+        }
     }
 
     public static function get(): Collection
@@ -60,24 +56,46 @@ abstract class Model
         return new Collection($items);
     }
 
-    public function first(): Model
-    {
-        $queryBuilder = self::getQueryBuilder();
-        $items = $queryBuilder->get();
-        if (!empty($items)) {
-            return $items[0];
-        } else {
-            return $queryBuilder->wrapModelClass([]);
-        }
-    }
-
     public function __construct(array $attributes = [])
     {
         $this->attributes = $attributes;
     }
 
-//    public function first(): Model
-//    {
-//        return $this->wrapModelClass([]);
-//    }
+    public function __get($name)
+    {
+        $exploded = explode('_', $name);
+        $ucFirstExploded = array_map('ucfirst', $exploded);
+        $getterName = 'get' . implode('', $ucFirstExploded);
+        if (method_exists($this, $getterName)) {
+            return $this->$getterName();
+        }
+
+        if (isset($this->attributes[$name])) {
+            return $this->attributes[$name];
+        }
+
+        throw new LogicException('No such attribute: ' . $name);
+    }
+
+    public function update(array $updateAttributes): Model
+    {
+        $queryBuilder = self::getQueryBuilder();
+        foreach ($updateAttributes as $updatedAttribute => $newValue) {
+            if (!isset($this->attributes[$updatedAttribute])) {
+                throw new ColumnNotFoundException('no such column ' . $updatedAttribute);
+            }
+            $this->attributes[$updatedAttribute] = $newValue;
+        }
+
+        return $queryBuilder->update($this->attributes);
+    }
+
+    public function destroy(): void
+    {
+        if (empty ($this->attributes)) {
+            throw new LogicException('Nothing to delete');
+        }
+
+        (self::getQueryBuilder())->delete($this->attributes);
+    }
 }
